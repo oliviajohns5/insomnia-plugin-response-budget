@@ -26,6 +26,7 @@ async function main() {
   assert(metrics.json.nodeCount > 700);
   assert(metrics.json.maxDepth >= 4);
   assert(metrics.json.maxArrayLength === 120);
+  assert(metrics.json.hotPaths.some(p => p.path === '$.users' && p.kind === 'array'));
 
   const report = t.evaluateBudget(metrics, {
     maxBytes: 1000,
@@ -54,6 +55,8 @@ async function main() {
   assert(md.includes('response-too-large'));
   assert(md.includes('## Metrics'));
   assert(md.includes('## Fix Ideas'));
+  assert(md.includes('## Largest JSON Hotspots'));
+  assert(md.includes('$.users'));
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'response-budget-'));
   try {

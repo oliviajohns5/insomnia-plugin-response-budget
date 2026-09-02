@@ -22,17 +22,30 @@ function byteLength(text) {
   return Buffer.byteLength(safeString(text), 'utf8');
 }
 
-function walkJson(value, depth = 1, state) {
+function estimateJsonBytes(value) {
+  try { return Buffer.byteLength(JSON.stringify(value), 'utf8'); } catch { return 0; }
+}
+
+function pushHotPath(state, path, value, kind) {
+  state.hotPaths.push({ path, kind, bytes: estimateJsonBytes(value) });
+}
+
+function walkJson(value, depth = 1, state, path = '$') {
   state.nodeCount += 1;
   state.maxDepth = Math.max(state.maxDepth, depth);
-  if (typeof value === 'string') state.maxStringLength = Math.max(state.maxStringLength, value.length);
+  if (typeof value === 'string') {
+    state.maxStringLength = Math.max(state.maxStringLength, value.length);
+    if (value.length > 256) pushHotPath(state, path, value, 'string');
+  }
   if (Array.isArray(value)) {
     state.maxArrayLength = Math.max(state.maxArrayLength, value.length);
-    for (const item of value) walkJson(item, depth + 1, state);
+    if (value.length > 25) pushHotPath(state, path, value, 'array');
+    value.forEach((item, index) => walkJson(item, depth + 1, state, `${path}[${index}]`));
   } else if (value && typeof value === 'object') {
     const keys = Object.keys(value);
     state.maxObjectKeys = Math.max(state.maxObjectKeys, keys.length);
-    for (const key of keys) walkJson(value[key], depth + 1, state);
+    if (keys.length > 25) pushHotPath(state, path, value, 'object');
+    for (const key of keys) walkJson(value[key], depth + 1, state, `${path}.${key}`);
   }
 }
 
@@ -50,6 +63,7 @@ function analyzePayload(payload) {
       maxObjectKeys: 0,
       maxStringLength: 0,
       nodeCount: 0,
+      hotPaths: [],
       error: '',
     },
   };
@@ -57,8 +71,9 @@ function analyzePayload(payload) {
     const parsed = JSON.parse(text);
     metrics.json.valid = true;
     metrics.json.topLevelType = Array.isArray(parsed) ? 'array' : parsed === null ? 'null' : typeof parsed;
-    const state = { maxDepth: 0, maxArrayLength: 0, maxObjectKeys: 0, maxStringLength: 0, nodeCount: 0 };
+    const state = { maxDepth: 0, maxArrayLength: 0, maxObjectKeys: 0, maxStringLength: 0, nodeCount: 0, hotPaths: [] };
     walkJson(parsed, 1, state);
+    state.hotPaths = state.hotPaths.sort((a, b) => b.bytes - a.bytes).slice(0, 10);
     Object.assign(metrics.json, state);
   } catch (err) {
     metrics.json.error = err && err.message ? err.message : 'invalid JSON';
@@ -103,7 +118,10 @@ function makeMarkdown(report) {
   const fixes = report.findings.length
     ? report.findings.map((f, i) => `${i + 1}. **${f.type}** — ${f.fix}`).join('\n')
     : 'No budget fixes needed.';
-  return `# Insomnia Response Budget Report\n\nGenerated: ${new Date().toISOString()}\n\nLocal-only report. No network calls, no telemetry, no backend.\n\n## Summary\n\n- Budget result: ${report.status}\n- Quality score: ${report.score}/100\n- Body size: ${formatBytes(m.bytes)} (${m.bytes} bytes)\n- JSON parsed: ${j.valid ? 'yes' : 'no'}\n\n## Metrics\n\n- Characters: ${m.characters}\n- Lines: ${m.lines}\n- JSON top-level type: ${j.topLevelType}\n- JSON max depth: ${j.maxDepth}\n- Largest JSON array: ${j.maxArrayLength}\n- Largest object key count: ${j.maxObjectKeys}\n- Largest string length: ${j.maxStringLength}\n- JSON node count: ${j.nodeCount}\n\n## Budgets\n\n- Max bytes: ${report.budget.maxBytes}\n- Max JSON depth: ${report.budget.maxJsonDepth}\n- Max array length: ${report.budget.maxArrayLength}\n- Max node count: ${report.budget.maxNodeCount}\n- Max string length: ${report.budget.maxStringLength}\n\n## Findings\n\n| Severity | Type | Message | Value | Limit | Fix |\n|---|---|---|---:|---:|---|\n${rows}\n\n## Fix Ideas\n\n${fixes}\n`;
+  const hotPaths = j.hotPaths && j.hotPaths.length
+    ? j.hotPaths.map(p => `| ${p.path.replace(/\|/g, '\\|')} | ${p.kind} | ${formatBytes(p.bytes)} |`).join('\n')
+    : '|  | none |  |';
+  return `# Insomnia Response Budget Report\n\nGenerated: ${new Date().toISOString()}\n\nLocal-only report. No network calls, no telemetry, no backend.\n\n## Summary\n\n- Budget result: ${report.status}\n- Quality score: ${report.score}/100\n- Body size: ${formatBytes(m.bytes)} (${m.bytes} bytes)\n- JSON parsed: ${j.valid ? 'yes' : 'no'}\n\n## Metrics\n\n- Characters: ${m.characters}\n- Lines: ${m.lines}\n- JSON top-level type: ${j.topLevelType}\n- JSON max depth: ${j.maxDepth}\n- Largest JSON array: ${j.maxArrayLength}\n- Largest object key count: ${j.maxObjectKeys}\n- Largest string length: ${j.maxStringLength}\n- JSON node count: ${j.nodeCount}\n\n## Largest JSON Hotspots\n\n| Path | Kind | Approx size |\n|---|---|---:|\n${hotPaths}\n\n## Budgets\n\n- Max bytes: ${report.budget.maxBytes}\n- Max JSON depth: ${report.budget.maxJsonDepth}\n- Max array length: ${report.budget.maxArrayLength}\n- Max node count: ${report.budget.maxNodeCount}\n- Max string length: ${report.budget.maxStringLength}\n\n## Findings\n\n| Severity | Type | Message | Value | Limit | Fix |\n|---|---|---|---:|---:|---|\n${rows}\n\n## Fix Ideas\n\n${fixes}\n`;
 }
 
 async function readResponseBody(context) {

@@ -136,3 +136,9 @@ npm pack --dry-run
 ## License
 
 MIT
+
+## Changelog
+
+### 1.0.1
+
+- Adds largest JSON hotspot reporting so oversized responses show the exact paths to trim.
