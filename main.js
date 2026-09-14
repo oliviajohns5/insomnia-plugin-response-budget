@@ -111,6 +111,22 @@ function formatBytes(n) {
   return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
+function makeJsonSidecar(report) {
+  return {
+    status: report.status,
+    score: report.score,
+    metrics: report.metrics,
+    budget: report.budget,
+    findings: report.findings,
+  };
+}
+
+function jsonSidecarPath(markdownPath) {
+  const parsed = path.parse(markdownPath);
+  const base = parsed.ext.toLowerCase() === '.md' ? parsed.name : parsed.base;
+  return path.join(parsed.dir, `${base}.json`);
+}
+
 function makeMarkdown(report) {
   const m = report.metrics;
   const j = m.json;
@@ -153,8 +169,10 @@ async function exportReport(context) {
     output = await context.app.showSaveDialog({ defaultPath: 'insomnia-response-budget-report.md' });
   }
   if (!output) output = await getWritableExportPath(context, 'insomnia-response-budget-report.md');
+  const sidecar = jsonSidecarPath(output);
   fs.writeFileSync(output, markdown, 'utf8');
-  if (context.app && typeof context.app.alert === 'function') await context.app.alert('Response Budget report exported', output);
+  fs.writeFileSync(sidecar, JSON.stringify(makeJsonSidecar(report), null, 2) + '\n', 'utf8');
+  if (context.app && typeof context.app.alert === 'function') await context.app.alert('Response Budget report exported', `${output}\nJSON sidecar: ${sidecar}`);
 }
 
 async function responseHook(context) {
@@ -172,4 +190,4 @@ module.exports.responseHooks = [responseHook];
 module.exports.workspaceActions = [action];
 module.exports.requestGroupActions = [action];
 module.exports.requestActions = [action];
-module.exports.__test = { DEFAULT_BUDGETS, analyzePayload, byteLength, evaluateBudget, exportReport, formatBytes, getWritableExportPath, makeMarkdown, readResponseBody, responseHook };
+module.exports.__test = { DEFAULT_BUDGETS, analyzePayload, byteLength, evaluateBudget, exportReport, formatBytes, getWritableExportPath, jsonSidecarPath, makeJsonSidecar, makeMarkdown, readResponseBody, responseHook };

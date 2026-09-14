@@ -1,6 +1,6 @@
 {
   "name": "insomnia-plugin-response-budget",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Local-only Insomnia response budget reports for body size, JSON depth, array length, and payload complexity.",
   "main": "main.js",
   "license": "MIT",

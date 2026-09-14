@@ -77,6 +77,14 @@ async function main() {
     await plugin.requestActions[0].action(ctx);
     const text = fs.readFileSync(out, 'utf8');
     assert(text.includes('Insomnia Response Budget Report'));
+    const sidecarPath = path.join(tmp, 'budget.json');
+    assert.strictEqual(t.jsonSidecarPath(out), sidecarPath);
+    const sidecar = JSON.parse(fs.readFileSync(sidecarPath, 'utf8'));
+    assert.strictEqual(sidecar.status, 'pass');
+    assert.strictEqual(sidecar.metrics.json.valid, true);
+    assert.deepStrictEqual(Object.keys(sidecar).sort(), ['budget', 'findings', 'metrics', 'score', 'status']);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(sidecar, 'body'), false);
+    assert.strictEqual(Object.prototype.hasOwnProperty.call(sidecar, 'responseBody'), false);
     assert.strictEqual(alerts.length, 1);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });

@@ -18,7 +18,8 @@ APIs often become slow because responses grow quietly: huge arrays, deeply neste
 - Reports JSON node count / complexity
 - Reports largest object key count and string length
 - Warns on oversized responses after a response hook
-- Exports a local Markdown report
+- Exports a local Markdown report plus a JSON sidecar for automation
+- JSON sidecar includes status, score, metrics, budgets, and findings only — never response body content
 - Works without accounts, cloud, telemetry, or dependencies
 
 ## Install
@@ -105,7 +106,8 @@ Response Budget is local-only.
 - No accounts
 - No credentials
 - No dependencies
-- Local Markdown export only
+- Local Markdown export plus JSON sidecar
+- JSON sidecar omits response body content and stores only computed status, score, metrics, budgets, and findings
 
 ## Development
 
@@ -138,6 +140,11 @@ npm pack --dry-run
 MIT
 
 ## Changelog
+
+### 1.0.2
+
+- Adds a local JSON sidecar export for automation with status, score, metrics, budgets, and findings, while excluding response body content.
+- Adds hard QA coverage that fails if sidecar export leaks response body values.
 
 ### 1.0.1
 

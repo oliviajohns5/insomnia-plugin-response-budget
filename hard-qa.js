@@ -69,19 +69,33 @@ async function run() {
     assert(!md.includes('null'));
   });
 
-  await check('action writes fallback path report', async () => {
+  await check('action writes fallback path report and JSON sidecar without body content', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'response-budget-hard-'));
     try {
       const alerts = [];
+      const secret = 'SECRET_RESPONSE_BODY_CONTENT_DO_NOT_EXPORT_' + 'x'.repeat(300);
       const ctx = {
-        response: { getBody: async () => Buffer.from(JSON.stringify({ ok: true })) },
+        response: { getBody: async () => Buffer.from(JSON.stringify({ ok: true, token: secret, rows: [secret] })) },
         app: { showSaveDialog: async () => null, getPath: async () => tmp, alert: async (title, message) => alerts.push({ title, message }) },
       };
       await plugin.requestActions[0].action(ctx);
-      const files = fs.readdirSync(tmp).filter(f => f.endsWith('.md'));
-      assert(files.length === 1);
-      assert(fs.readFileSync(path.join(tmp, files[0]), 'utf8').includes('Budget result: pass'));
+      const files = fs.readdirSync(tmp);
+      const markdownFiles = files.filter(f => f.endsWith('.md'));
+      const jsonFiles = files.filter(f => f.endsWith('.json'));
+      assert.strictEqual(markdownFiles.length, 1);
+      assert.strictEqual(jsonFiles.length, 1);
+      assert(fs.readFileSync(path.join(tmp, markdownFiles[0]), 'utf8').includes('Budget result: pass'));
+      const jsonText = fs.readFileSync(path.join(tmp, jsonFiles[0]), 'utf8');
+      const sidecar = JSON.parse(jsonText);
+      assert.strictEqual(sidecar.status, 'pass');
+      assert.strictEqual(sidecar.metrics.json.valid, true);
+      assert.deepStrictEqual(Object.keys(sidecar).sort(), ['budget', 'findings', 'metrics', 'score', 'status']);
+      assert(!jsonText.includes(secret));
+      assert(!jsonText.includes('SECRET_RESPONSE_BODY_CONTENT'));
+      assert(!Object.prototype.hasOwnProperty.call(sidecar, 'body'));
+      assert(!Object.prototype.hasOwnProperty.call(sidecar, 'responseBody'));
       assert.strictEqual(alerts.length, 1);
+      assert(alerts[0].message.includes('.json'));
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }

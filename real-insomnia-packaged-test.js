@@ -14,4 +14,8 @@ const report = t.evaluateBudget(t.analyzePayload(JSON.stringify({ data: 'x'.repe
 assert.strictEqual(report.status, 'fail');
 assert(report.findings.some(f => f.type === 'response-too-large'));
 assert(t.makeMarkdown(report).includes('Insomnia Response Budget Report'));
+const sidecar = t.makeJsonSidecar(report);
+assert.deepStrictEqual(Object.keys(sidecar).sort(), ['budget', 'findings', 'metrics', 'score', 'status']);
+assert.strictEqual(sidecar.status, 'fail');
+assert(!JSON.stringify(sidecar).includes('x'.repeat(128)), 'sidecar must not include response body content');
 console.log('PASS: packaged plugin integration harness');
