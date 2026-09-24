@@ -140,6 +140,18 @@ function makeMarkdown(report) {
   return `# Insomnia Response Budget Report\n\nGenerated: ${new Date().toISOString()}\n\nLocal-only report. No network calls, no telemetry, no backend.\n\n## Summary\n\n- Budget result: ${report.status}\n- Quality score: ${report.score}/100\n- Body size: ${formatBytes(m.bytes)} (${m.bytes} bytes)\n- JSON parsed: ${j.valid ? 'yes' : 'no'}\n\n## Metrics\n\n- Characters: ${m.characters}\n- Lines: ${m.lines}\n- JSON top-level type: ${j.topLevelType}\n- JSON max depth: ${j.maxDepth}\n- Largest JSON array: ${j.maxArrayLength}\n- Largest object key count: ${j.maxObjectKeys}\n- Largest string length: ${j.maxStringLength}\n- JSON node count: ${j.nodeCount}\n\n## Largest JSON Hotspots\n\n| Path | Kind | Approx size |\n|---|---|---:|\n${hotPaths}\n\n## Budgets\n\n- Max bytes: ${report.budget.maxBytes}\n- Max JSON depth: ${report.budget.maxJsonDepth}\n- Max array length: ${report.budget.maxArrayLength}\n- Max node count: ${report.budget.maxNodeCount}\n- Max string length: ${report.budget.maxStringLength}\n\n## Findings\n\n| Severity | Type | Message | Value | Limit | Fix |\n|---|---|---|---:|---:|---|\n${rows}\n\n## Fix Ideas\n\n${fixes}\n`;
 }
 
+
+function normalizeSaveDialogResult(result) {
+  if (!result) return null;
+  if (typeof result === 'string') return result;
+  if (typeof result === 'object') {
+    if (result.canceled) return null;
+    if (typeof result.filePath === 'string' && result.filePath) return result.filePath;
+    if (typeof result.path === 'string' && result.path) return result.path;
+  }
+  return null;
+}
+
 async function readResponseBody(context) {
   const response = context && context.response ? context.response : {};
   if (typeof response.getBody === 'function') return safeString(await response.getBody());
@@ -166,7 +178,7 @@ async function exportReport(context) {
   const markdown = makeMarkdown(report);
   let output = null;
   if (context.app && typeof context.app.showSaveDialog === 'function') {
-    output = await context.app.showSaveDialog({ defaultPath: 'insomnia-response-budget-report.md' });
+    output = normalizeSaveDialogResult(await context.app.showSaveDialog({ defaultPath: 'insomnia-response-budget-report.md' }));
   }
   if (!output) output = await getWritableExportPath(context, 'insomnia-response-budget-report.md');
   const sidecar = jsonSidecarPath(output);
@@ -190,4 +202,4 @@ module.exports.responseHooks = [responseHook];
 module.exports.workspaceActions = [action];
 module.exports.requestGroupActions = [action];
 module.exports.requestActions = [action];
-module.exports.__test = { DEFAULT_BUDGETS, analyzePayload, byteLength, evaluateBudget, exportReport, formatBytes, getWritableExportPath, jsonSidecarPath, makeJsonSidecar, makeMarkdown, readResponseBody, responseHook };
+module.exports.__test = { DEFAULT_BUDGETS, analyzePayload, byteLength, evaluateBudget, exportReport, formatBytes, getWritableExportPath, jsonSidecarPath, makeJsonSidecar, makeMarkdown, normalizeSaveDialogResult, readResponseBody, responseHook };

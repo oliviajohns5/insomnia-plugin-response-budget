@@ -141,6 +141,11 @@ MIT
 
 ## Changelog
 
+### 1.0.3
+
+- Report export now supports Electron-style save dialog results and still writes the JSON sidecar.
+
+
 ### 1.0.2
 
 - Adds a local JSON sidecar export for automation with status, score, metrics, budgets, and findings, while excluding response body content.

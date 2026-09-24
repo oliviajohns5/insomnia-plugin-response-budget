@@ -57,6 +57,9 @@ async function main() {
   assert(md.includes('## Fix Ideas'));
   assert(md.includes('## Largest JSON Hotspots'));
   assert(md.includes('$.users'));
+  assert.strictEqual(t.normalizeSaveDialogResult('/tmp/report.md'), '/tmp/report.md');
+  assert.strictEqual(t.normalizeSaveDialogResult({ filePath: '/tmp/report.md', canceled: false }), '/tmp/report.md');
+  assert.strictEqual(t.normalizeSaveDialogResult({ canceled: true }), null);
 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'response-budget-'));
   try {
@@ -86,6 +89,18 @@ async function main() {
     assert.strictEqual(Object.prototype.hasOwnProperty.call(sidecar, 'body'), false);
     assert.strictEqual(Object.prototype.hasOwnProperty.call(sidecar, 'responseBody'), false);
     assert.strictEqual(alerts.length, 1);
+
+    const objectOut = path.join(tmp, 'object.md');
+    await plugin.requestActions[0].action({
+      response: { getBody: async () => Buffer.from(sample) },
+      app: {
+        showSaveDialog: async () => ({ filePath: objectOut, canceled: false }),
+        getPath: async () => tmp,
+        alert: async () => {},
+      },
+    });
+    assert(fs.existsSync(objectOut), 'object save dialog writes Markdown');
+    assert(fs.existsSync(path.join(tmp, 'object.json')), 'object save dialog writes JSON sidecar');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
