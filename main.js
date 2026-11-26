@@ -22,31 +22,66 @@ function byteLength(text) {
   return Buffer.byteLength(safeString(text), 'utf8');
 }
 
-function estimateJsonBytes(value) {
-  try { return Buffer.byteLength(JSON.stringify(value), 'utf8'); } catch { return 0; }
+function pushHotPath(state, pathNode, bytes, kind) {
+  const hotPaths = state.hotPaths;
+  // Maintain the largest ten in traversal order for equal-sized hotspots.
+  const index = hotPaths.findIndex(item => item.bytes < bytes);
+  if (index < 0 && hotPaths.length >= 10) return;
+  const candidate = { pathNode, kind, bytes };
+  if (index < 0) {
+    if (hotPaths.length < 10) hotPaths.push(candidate);
+  } else {
+    hotPaths.splice(index, 0, candidate);
+    if (hotPaths.length > 10) hotPaths.pop();
+  }
 }
 
-function pushHotPath(state, path, value, kind) {
-  state.hotPaths.push({ path, kind, bytes: estimateJsonBytes(value) });
-}
-
-function walkJson(value, depth = 1, state, path = '$') {
-  state.nodeCount += 1;
-  state.maxDepth = Math.max(state.maxDepth, depth);
-  if (typeof value === 'string') {
-    state.maxStringLength = Math.max(state.maxStringLength, value.length);
-    if (value.length > 256) pushHotPath(state, path, value, 'string');
+function walkJson(value, state) {
+  // Path links are retained only for the ten winners, not built for every candidate.
+  const stack = [{ value, pathNode: { segment: '$', parent: null }, index: 0, keys: null, entered: false, bytes: 0, kind: null }];
+  while (stack.length) {
+    const frame = stack[stack.length - 1];
+    const current = frame.value;
+    if (!frame.entered) {
+      frame.entered = true;
+      state.nodeCount += 1;
+      state.maxDepth = Math.max(state.maxDepth, stack.length);
+      if (typeof current === 'string') {
+        state.maxStringLength = Math.max(state.maxStringLength, current.length);
+        if (current.length > 256) frame.kind = 'string';
+      }
+      if (Array.isArray(current)) {
+        state.maxArrayLength = Math.max(state.maxArrayLength, current.length);
+        frame.bytes = 2 + Math.max(0, current.length - 1); // brackets and commas
+        if (current.length > 25) frame.kind = 'array';
+      } else if (current && typeof current === 'object') {
+        frame.keys = Object.keys(current);
+        state.maxObjectKeys = Math.max(state.maxObjectKeys, frame.keys.length);
+        frame.bytes = 2 + Math.max(0, frame.keys.length - 1); // braces and commas
+        if (frame.keys.length > 25) frame.kind = 'object';
+      } else {
+        // JSON.parse produces only JSON primitives, so no replacers or toJSON hooks.
+        frame.bytes = Buffer.byteLength(JSON.stringify(current), 'utf8');
+      }
+    }
+    if (Array.isArray(current) && frame.index < current.length) {
+      const index = frame.index++;
+      stack.push({ value: current[index], pathNode: { segment: `[${index}]`, parent: frame.pathNode }, index: 0, keys: null, entered: false, bytes: 0, kind: null });
+    } else if (frame.keys && frame.index < frame.keys.length) {
+      const key = frame.keys[frame.index++];
+      frame.bytes += Buffer.byteLength(JSON.stringify(key), 'utf8') + 1; // key and colon
+      stack.push({ value: current[key], pathNode: { segment: `.${key}`, parent: frame.pathNode }, index: 0, keys: null, entered: false, bytes: 0, kind: null });
+    } else {
+      if (frame.kind) pushHotPath(state, frame.pathNode, frame.bytes, frame.kind);
+      stack.pop();
+      if (stack.length) stack[stack.length - 1].bytes += frame.bytes;
+    }
   }
-  if (Array.isArray(value)) {
-    state.maxArrayLength = Math.max(state.maxArrayLength, value.length);
-    if (value.length > 25) pushHotPath(state, path, value, 'array');
-    value.forEach((item, index) => walkJson(item, depth + 1, state, `${path}[${index}]`));
-  } else if (value && typeof value === 'object') {
-    const keys = Object.keys(value);
-    state.maxObjectKeys = Math.max(state.maxObjectKeys, keys.length);
-    if (keys.length > 25) pushHotPath(state, path, value, 'object');
-    for (const key of keys) walkJson(value[key], depth + 1, state, `${path}.${key}`);
-  }
+  state.hotPaths = state.hotPaths.map(({ pathNode, kind, bytes }) => {
+    const segments = [];
+    for (let node = pathNode; node; node = node.parent) segments.push(node.segment);
+    return { path: segments.reverse().join(''), kind, bytes };
+  });
 }
 
 function analyzePayload(payload) {
@@ -72,8 +107,7 @@ function analyzePayload(payload) {
     metrics.json.valid = true;
     metrics.json.topLevelType = Array.isArray(parsed) ? 'array' : parsed === null ? 'null' : typeof parsed;
     const state = { maxDepth: 0, maxArrayLength: 0, maxObjectKeys: 0, maxStringLength: 0, nodeCount: 0, hotPaths: [] };
-    walkJson(parsed, 1, state);
-    state.hotPaths = state.hotPaths.sort((a, b) => b.bytes - a.bytes).slice(0, 10);
+    walkJson(parsed, state);
     Object.assign(metrics.json, state);
   } catch (err) {
     metrics.json.error = err && err.message ? err.message : 'invalid JSON';

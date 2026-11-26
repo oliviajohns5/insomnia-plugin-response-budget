@@ -42,6 +42,85 @@ async function main() {
   assert(types.has('json-too-complex'));
   assert(report.score < 70);
 
+  const deepBody = '['.repeat(12000) + '1' + ']'.repeat(12000);
+  const deep = t.evaluateBudget(t.analyzePayload(deepBody), t.DEFAULT_BUDGETS);
+  assert.strictEqual(deep.metrics.json.valid, true);
+  assert.strictEqual(deep.metrics.json.maxDepth, 12001);
+  assert.strictEqual(deep.metrics.json.nodeCount, 12001);
+  assert.deepStrictEqual(deep.findings.map(f => f.type), ['json-too-deep', 'json-too-complex']);
+  assert.strictEqual(deep.status, 'warn');
+
+  const deeper = t.analyzePayload('{"a":'.repeat(20000) + '0' + '}'.repeat(20000));
+  assert.strictEqual(deeper.json.valid, true);
+  assert.strictEqual(deeper.json.maxDepth, 20001);
+  assert.strictEqual(deeper.json.maxObjectKeys, 1);
+  assert.strictEqual(deeper.json.nodeCount, 20001);
+
+  const wideObject = Object.fromEntries(Array.from({ length: 26 }, (_, i) => [`k${i}`, null]));
+  const wideArray = Array.from({ length: 26 }, (_, i) => i);
+  const mixed = t.analyzePayload(JSON.stringify({
+    first: 'x'.repeat(257),
+    second: 'y'.repeat(257),
+    list: wideArray,
+    object: wideObject,
+  }));
+  assert.strictEqual(mixed.json.maxDepth, 3);
+  assert.strictEqual(mixed.json.maxArrayLength, 26);
+  assert.strictEqual(mixed.json.maxObjectKeys, 26);
+  assert.strictEqual(mixed.json.maxStringLength, 257);
+  assert.strictEqual(mixed.json.nodeCount, 57);
+  assert.deepStrictEqual(mixed.json.hotPaths.map(({ path, kind }) => [path, kind]), [
+    ['$.object', 'object'], ['$.first', 'string'], ['$.second', 'string'], ['$.list', 'array'],
+  ]);
+  assert.deepStrictEqual(mixed.json.hotPaths.map(({ bytes }) => bytes), [
+    Buffer.byteLength(JSON.stringify(wideObject)), 259, 259,
+    Buffer.byteLength(JSON.stringify(wideArray)),
+  ]);
+
+  const deepWideBody = '[' + Array.from({ length: 26 }, (_, i) => i === 0 ? '['.repeat(12000) + '1' + ']'.repeat(12000) : 'null').join(',') + ']';
+  const deepWide = t.analyzePayload(deepWideBody);
+  assert.strictEqual(deepWide.json.valid, true);
+  assert.strictEqual(deepWide.json.maxDepth, 12002);
+  assert.deepStrictEqual(deepWide.json.hotPaths, [
+    { path: '$', kind: 'array', bytes: Buffer.byteLength(deepWideBody) },
+  ]);
+
+  const nestedWide = Array.from({ length: 26 }, (_, i) => ({
+    id: i,
+    values: Array.from({ length: 2000 }, (_, j) => j),
+  }));
+  const nestedWideBody = JSON.stringify(nestedWide);
+  const nestedWideMetrics = t.analyzePayload(nestedWideBody);
+  assert.strictEqual(nestedWideMetrics.json.valid, true);
+  assert.strictEqual(nestedWideMetrics.json.maxArrayLength, 2000);
+  assert.strictEqual(nestedWideMetrics.json.nodeCount, 52079);
+  assert.deepStrictEqual(nestedWideMetrics.json.hotPaths.map(p => p.path), [
+    '$', '$[0].values', '$[1].values', '$[2].values', '$[3].values',
+    '$[4].values', '$[5].values', '$[6].values', '$[7].values', '$[8].values',
+  ]);
+  assert.strictEqual(nestedWideMetrics.json.hotPaths[0].bytes, Buffer.byteLength(nestedWideBody));
+  assert.strictEqual(nestedWideMetrics.json.hotPaths[1].bytes,
+    Buffer.byteLength(JSON.stringify(nestedWide[0].values)));
+
+  const escapedObject = Object.fromEntries(Array.from({ length: 26 }, (_, i) =>
+    [i === 0 ? 'é\\"\n' : `k${i}`, i === 0 ? '😀\\"\n' : null]));
+  const escapedBody = JSON.stringify({ escapedObject });
+  const escaped = t.analyzePayload(escapedBody);
+  assert.deepStrictEqual(escaped.json.hotPaths, [
+    { path: '$.escapedObject', kind: 'object', bytes: Buffer.byteLength(JSON.stringify(escapedObject)) },
+  ]);
+
+  const many = t.analyzePayload(JSON.stringify(Array.from({ length: 26 }, (_, i) => 'x'.repeat(257 + i))));
+  assert.strictEqual(many.json.hotPaths.length, 10);
+  assert.deepStrictEqual(many.json.hotPaths.map(p => p.path), [
+    '$', '$[25]', '$[24]', '$[23]', '$[22]', '$[21]', '$[20]', '$[19]', '$[18]', '$[17]',
+  ]);
+
+  const ties = t.analyzePayload(JSON.stringify(Array.from({ length: 26 }, () => 'x'.repeat(257))));
+  assert.deepStrictEqual(ties.json.hotPaths.map(p => p.path), [
+    '$', '$[0]', '$[1]', '$[2]', '$[3]', '$[4]', '$[5]', '$[6]', '$[7]', '$[8]',
+  ]);
+
   const small = t.evaluateBudget(t.analyzePayload('{"ok":true}'), t.DEFAULT_BUDGETS);
   assert.strictEqual(small.status, 'pass');
   assert.strictEqual(small.findings.length, 0);
